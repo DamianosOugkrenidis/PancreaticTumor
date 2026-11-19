@@ -109,7 +109,11 @@ def main() -> int:
         for index, batch in enumerate(val_loader):
             images = batch["image"].to(device, non_blocking=True)
             labels = batch["label"]
-            name = Path(str(batch.get("image_meta_dict", {}).get("filename_or_obj", [f"case_{index:03d}"])[0])).name
+            meta = batch.get("image_meta_dict", {})
+            source = meta.get("filename_or_obj", [f"case_{index:03d}"])
+            if isinstance(source, (list, tuple)):
+                source = source[0] if source else f"case_{index:03d}"
+            name = Path(str(source)).name
 
             logits = sliding_window_inference(images, config.data.roi_size, model,
                                               sw_batch_size=int(config.eval.sw_batch_size),

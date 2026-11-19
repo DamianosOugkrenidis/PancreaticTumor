@@ -80,6 +80,14 @@ def gather_metrics(run: Path) -> dict:
             "mean_hd95", "num_cases")
     record = {key: _number(payload.get(key)) for key in keys}
     record["train_seconds"] = train_seconds
+    size_path = run / "artifacts" / "tumor_size_analysis.json"
+    small_dice = large_dice = None
+    if size_path.is_file():
+        groups = _read_json(size_path).get("groups") or {}
+        small_dice = _number((groups.get("small") or {}).get("mean_tumor_dice"))
+        large_dice = _number((groups.get("large") or {}).get("mean_tumor_dice"))
+    record["small_tumor_dice"] = small_dice
+    record["large_tumor_dice"] = large_dice
     record["run"] = run.name
     return record
 
@@ -159,7 +167,8 @@ def main() -> int:
         else:
             record.update({key: None for key in ("pancreas_dice", "tumor_dice", "tumor_iou",
                                                  "tumor_hd95", "mean_dice", "mean_hd95",
-                                                 "num_cases", "train_seconds")})
+                                                 "num_cases", "train_seconds",
+                                                 "small_tumor_dice", "large_tumor_dice")})
             record["run"] = None
         rows.append(record)
 
@@ -167,7 +176,7 @@ def main() -> int:
 
     header = (f"{'model':<14}{'params(M)':>10}{'GFLOPs':>9}{'fwd ms':>9}{'tumor Dice':>11}"
               f"{'tumor IoU':>10}{'HD95(mm)':>10}{'panc Dice':>10}{'mean Dice':>10}"
-              f"{'train(h)':>9}")
+              f"{'small Dice':>11}{'large Dice':>11}{'train(h)':>9}")
     print(f"device: {device} | roi: {tuple(arguments.roi)} | runs: {runs_dir}")
     print(header)
     print("-" * len(header))
@@ -179,6 +188,7 @@ def main() -> int:
               f"{_fmt(row.get('tumor_dice')):>11}{_fmt(row.get('tumor_iou')):>10}"
               f"{_fmt(row.get('tumor_hd95'), '{:.1f}'):>10}"
               f"{_fmt(row.get('pancreas_dice')):>10}{_fmt(row.get('mean_dice')):>10}"
+              f"{_fmt(row.get('small_tumor_dice')):>11}{_fmt(row.get('large_tumor_dice')):>11}"
               f"{_fmt(train_hours, '{:.1f}'):>9}")
 
     if not any(row.get("tumor_dice") is not None for row in rows):
@@ -187,8 +197,8 @@ def main() -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     fields = ["model", "parameters", "gflops", "forward_ms", "pancreas_dice", "tumor_dice",
-              "tumor_iou", "tumor_hd95", "mean_dice", "mean_hd95", "num_cases",
-              "train_seconds", "run"]
+              "tumor_iou", "tumor_hd95", "small_tumor_dice", "large_tumor_dice", "mean_dice",
+              "mean_hd95", "num_cases", "train_seconds", "run"]
     with (output_dir / "comparison.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
