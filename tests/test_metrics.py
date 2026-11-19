@@ -8,7 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import numpy as np
 
 from src.ptseg.metrics import (MetricAggregator, evaluate_case, hausdorff_distance_95,
-                               overlap_metrics)
+                               overlap_metrics, stratify_by_volume)
 
 
 def test_overlap_metrics_counts_tp_fp_fn() -> None:
@@ -59,6 +59,13 @@ def test_aggregator_excludes_undefined_and_reports_counts() -> None:
     assert abs(summary["pancreas_dice"] - 0.75) < 1e-9
     assert abs(summary["pancreas_hd95"] - 2.0) < 1e-9
     assert summary["undefined_hd95"] == 1.0
+
+
+def test_stratify_by_volume_terciles() -> None:
+    groups = stratify_by_volume([1, 2, 3, 4, 5, 6, 7, 8, 9], 3)
+    assert list(groups) == [0, 0, 0, 1, 1, 1, 2, 2, 2], list(groups)
+    missing = stratify_by_volume([0.0, 0.0], 3)
+    assert (missing == -1).all()
 
 
 def main() -> int:

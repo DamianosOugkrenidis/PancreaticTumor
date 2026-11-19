@@ -13,7 +13,7 @@ import torch
 from src.ptseg.config import Config, load_configs
 from src.ptseg.data.msd import build_dataloaders
 from src.ptseg.inference import sliding_window_inference, stats_positions
-from src.ptseg.metrics import MetricAggregator, evaluate_case
+from src.ptseg.metrics import MetricAggregator, evaluate_case, stratify_by_volume
 from src.ptseg.models import build_model, describe_model
 from src.ptseg.utils import (count_parameters, device_summary, dump_json, get_logger,
                              resolve_device, set_determinism)
@@ -42,6 +42,27 @@ def _write_summary_csv(path: Path, summary: dict[str, float], class_names: list[
             row += [f"{summary.get(f'{name}_{metric}', float('nan')):.4f}" for name in class_names]
             row += [f"{summary.get(f'mean_{metric}', float('nan')):.4f}"]
             writer.writerow(row)
+
+_SIZE_GROUPS = ("small", "medium", "large")
+
+def _tumor_size_report(records: list[dict], n_groups: int = 3) -> dict:
+    groups = stratify_by_volume([record["tumor_volume_ml"] for record in records], n_groups)
+    report = {"n_groups": n_groups, "groups": {}}
+    for index in range(n_groups):
+        members = [record for record, group in zip(records, groups) if group == index]
+        if not members:
+            continue
+        dices = [m["tumor_dice"] for m in members if not np.isnan(m["tumor_dice"])]
+        hd95 = [m["tumor_hd95"] for m in members if not np.isnan(m["tumor_hd95"])]
+        volumes = [m["tumor_volume_ml"] for m in members]
+        name = _SIZE_GROUPS[index] if index < len(_SIZE_GROUPS) else f"group_{index}"
+        report["groups"][name] = {
+            "cases": len(members),
+            "volume_ml_range": [float(min(volumes)), float(max(volumes))],
+            "mean_tumor_dice": float(np.mean(dices)) if dices else float("nan"),
+            "mean_tumor_hd95": float(np.mean(hd95)) if hd95 else float("nan"),
+        }
+    return report
 
 def main() -> int:
     arguments = parse_arguments()
@@ -80,6 +101,9 @@ def main() -> int:
     prediction_dir = run_dir / "predictions"
     case_names: list[str] = []
     window_counts: list[int] = []
+    tumor_index = int(config.data.labels.get("tumor", 2))
+    voxel_ml = float(np.prod(config.data.pixdim) / 1000.0)
+    tumor_records: list[dict] = []
 
     with torch.no_grad():
         for index, batch in enumerate(val_loader):
@@ -108,6 +132,12 @@ def main() -> int:
             window_counts.append(stats_positions(
                 config.data.roi_size, tuple(int(v) for v in images.shape[-3:]),
                 float(config.eval.overlap)))
+            tumor_records.append({
+                "case": name,
+                "tumor_volume_ml": float((ground_truth == tumor_index).sum()) * voxel_ml,
+                "tumor_dice": float(case_metrics.get("dice", {}).get("tumor", float("nan"))),
+                "tumor_hd95": float(case_metrics.get("hd95", {}).get("tumor", float("nan"))),
+            })
 
             summary_line = " | ".join(
                 f"{cls}_dice {case_metrics['dice'].get(cls, float('nan')):.4f}"
@@ -120,6 +150,8 @@ def main() -> int:
 
     summary = aggregator.summary()
     summary["cases"] = case_names
+    summary["tumor_size_analysis"] = _tumor_size_report(tumor_records)
+    dump_json(run_dir / "artifacts" / "tumor_size_analysis.json", summary["tumor_size_analysis"])
     summary.update({
         "model": config.model.name,
         "checkpoint": str(checkpoint_path),

@@ -126,3 +126,13 @@ class MetricAggregator:
     def per_case_series(self) -> dict[str, dict[str, list[float]]]:
         return {metric: {cls: list(series) for cls, series in per_class.items()}
                 for metric, per_class in self.values.items()}
+
+def stratify_by_volume(volumes, n_groups: int = 3) -> np.ndarray:
+    values = np.asarray(volumes, dtype=float)
+    groups = np.full(values.shape, -1, dtype=int)
+    valid = np.isfinite(values) & (values > 0)
+    if not valid.any() or n_groups < 1:
+        return groups
+    edges = np.quantile(values[valid], np.linspace(0.0, 1.0, n_groups + 1)[1:-1])
+    groups[valid] = np.searchsorted(edges, values[valid], side="right")
+    return groups
