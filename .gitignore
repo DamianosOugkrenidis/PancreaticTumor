@@ -1,0 +1,7 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+datasets/
+outputs/
+configs/local*.yml

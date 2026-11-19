@@ -1,0 +1,28 @@
+extends: unetr.yml
+
+run:
+  device: cpu
+  require_cuda: false
+  output_dir: outputs/smoke
+  run_name: smoke_unetr
+
+data:
+  roi_size: [32, 32, 32]
+  num_samples: 1
+  batch_size: 1
+  num_workers: 0
+  cache_rate: 0.0
+  augment: false
+
+train:
+  epochs: 2
+  amp: false
+  val_interval: 1
+  log_every_steps: 1
+  early_stopping:
+    enabled: false
+  loss:
+    name: dice_ce
+
+model:
+  img_size: [32, 32, 32]
