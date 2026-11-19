@@ -61,6 +61,17 @@ def test_aggregator_excludes_undefined_and_reports_counts() -> None:
     assert summary["undefined_hd95"] == 1.0
 
 
+def test_aggregator_per_case_series_stays_aligned() -> None:
+    aggregator = MetricAggregator(class_names=("pancreas",), metric_names=("dice", "hd95"))
+    aggregator.update({"dice": {"pancreas": 0.5}, "hd95": {"pancreas": float("nan")}})
+    aggregator.update({"dice": {"pancreas": 1.0}, "hd95": {"pancreas": 2.0}})
+    series = aggregator.per_case_series()
+    assert len(series["dice"]["pancreas"]) == 2
+    assert len(series["hd95"]["pancreas"]) == 2
+    assert np.isnan(series["hd95"]["pancreas"][0])
+    assert abs(series["hd95"]["pancreas"][1] - 2.0) < 1e-9
+
+
 def test_stratify_by_volume_terciles() -> None:
     groups = stratify_by_volume([1, 2, 3, 4, 5, 6, 7, 8, 9], 3)
     assert list(groups) == [0, 0, 0, 1, 1, 1, 2, 2, 2], list(groups)

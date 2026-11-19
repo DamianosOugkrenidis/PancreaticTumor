@@ -101,17 +101,22 @@ class MetricAggregator:
         self.num_cases += 1
         for name, per_class in case_metrics.items():
             for class_name, value in per_class.items():
-                if value is None or (isinstance(value, float) and np.isnan(value)):
+                undefined = value is None or (isinstance(value, float) and np.isnan(value))
+                if undefined:
                     self.undefined[name] = self.undefined.get(name, 0) + 1
-                    continue
-                self.values.setdefault(name, {}).setdefault(class_name, []).append(float(value))
+                self.values.setdefault(name, {}).setdefault(class_name, []).append(
+                    float("nan") if undefined else float(value))
 
     def mean(self, metric: str, class_name: str | None = None) -> float:
         if class_name is not None:
-            series = self.values.get(metric, {}).get(class_name, [])
-            return float(np.mean(series)) if series else float("nan")
-        series = [value for per_class in self.values.get(metric, {}).values() for value in per_class]
-        return float(np.mean(series)) if series else float("nan")
+            series = np.asarray(self.values.get(metric, {}).get(class_name, []), dtype=float)
+        else:
+            series = np.asarray(
+                [value for per_class in self.values.get(metric, {}).values() for value in per_class],
+                dtype=float)
+        if series.size == 0 or np.all(np.isnan(series)):
+            return float("nan")
+        return float(np.nanmean(series))
 
     def summary(self) -> dict[str, float]:
         payload: dict[str, float] = {"num_cases": float(self.num_cases)}

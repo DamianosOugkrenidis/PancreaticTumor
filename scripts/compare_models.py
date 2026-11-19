@@ -92,6 +92,44 @@ def gather_metrics(run: Path) -> dict:
     return record
 
 
+def load_per_case(run: Path) -> dict:
+    path = run / "artifacts" / "evaluation_per_case.json"
+    if not path.is_file():
+        return {}
+    payload = _read_json(path)
+    cases = payload.get("cases") or []
+    values = ((payload.get("series") or {}).get("dice") or {}).get("tumor") or []
+    return {str(name): float(value) for name, value in zip(cases, values)
+            if value is not None and not (isinstance(value, float) and math.isnan(value))}
+
+
+def pairwise_report(rows) -> dict:
+    usable = [(row["model"], row.get("_per_case") or {}) for row in rows if row.get("_per_case")]
+    report = {}
+    for i in range(len(usable)):
+        for j in range(i + 1, len(usable)):
+            name_a, first = usable[i]
+            name_b, second = usable[j]
+            common = sorted(set(first) & set(second))
+            if len(common) < 2:
+                continue
+            diffs = [first[case] - second[case] for case in common]
+            p_value = None
+            if len(common) >= 6 and any(abs(value) > 1e-9 for value in diffs):
+                try:
+                    from scipy.stats import wilcoxon
+
+                    p_value = float(wilcoxon(diffs).pvalue)
+                except Exception:
+                    p_value = None
+            report[f"{name_a} vs {name_b}"] = {
+                "cases": len(common),
+                "mean_tumor_dice_diff": sum(diffs) / len(diffs),
+                "wilcoxon_p": p_value,
+            }
+    return report
+
+
 def measure_cost(name: str, config_dir: Path, arguments, device: torch.device) -> dict:
     config = load_configs(
         [config_dir / f"{name}.yml"],
@@ -164,6 +202,7 @@ def main() -> int:
         run = find_run(runs_dir, name)
         if run is not None:
             record.update(gather_metrics(run))
+            record["_per_case"] = load_per_case(run)
         else:
             record.update({key: None for key in ("pancreas_dice", "tumor_dice", "tumor_iou",
                                                  "tumor_hd95", "mean_dice", "mean_hd95",
@@ -195,6 +234,14 @@ def main() -> int:
         print("\nNo evaluation metrics found. Run scripts/train.py + scripts/evaluate.py, "
               "or pass --train to do both before building the table.")
 
+    pairwise = pairwise_report(rows)
+    if pairwise:
+        print("\npaired tumor-Dice comparison (Wilcoxon signed-rank):")
+        for label, stats in pairwise.items():
+            p_value = "-" if stats["wilcoxon_p"] is None else f"{stats['wilcoxon_p']:.3f}"
+            print(f"  {label:<34} n={stats['cases']:<3} "
+                  f"mean diff {stats['mean_tumor_dice_diff']:+.3f}  p={p_value}")
+
     output_dir.mkdir(parents=True, exist_ok=True)
     fields = ["model", "parameters", "gflops", "forward_ms", "pancreas_dice", "tumor_dice",
               "tumor_iou", "tumor_hd95", "small_tumor_dice", "large_tumor_dice", "mean_dice",
@@ -204,8 +251,10 @@ def main() -> int:
         writer.writeheader()
         for row in rows:
             writer.writerow({key: row.get(key) for key in fields})
+    clean_rows = [{key: value for key, value in row.items() if key != "_per_case"} for row in rows]
     dump_json(output_dir / "comparison.json", {"device": str(device), "roi": arguments.roi,
-                                               "rows": rows})
+                                               "rows": clean_rows, "pairwise": pairwise})
+    dump_json(output_dir / "pairwise_stats.json", pairwise)
     print(f"\nReport written to {output_dir / 'comparison.csv'}")
     return 0
 
