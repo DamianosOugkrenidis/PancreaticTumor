@@ -68,6 +68,17 @@ def test_invalid_valid_ratio_is_rejected() -> None:
     expect_value_error(lambda: validate_config(config))
 
 
+def test_supported_loss_names_pass() -> None:
+    for name in ("dice_ce", "dice", "tversky", "focal"):
+        config = load_configs([CONFIGS / "unetr.yml"], [f"train.loss.name={name}"])
+        validate_config(config)
+
+
+def test_unknown_loss_is_rejected() -> None:
+    config = load_configs([CONFIGS / "unetr.yml"], ["train.loss.name=bogus"])
+    expect_value_error(lambda: validate_config(config))
+
+
 def main() -> int:
     tests = [(name, value) for name, value in sorted(globals().items())
              if name.startswith("test_") and callable(value)]

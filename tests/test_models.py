@@ -256,6 +256,16 @@ def test_gaussian_window_range() -> None:
     assert float(window.max()) == 1.0
     assert float(window.min()) > 0.0
 
+def test_flip_tta_returns_probabilities() -> None:
+    from src.ptseg.inference import flip_tta_inference
+
+    model = ConstantModel(value=0.5)
+    inputs = load_patch((16, 16, 16))
+    probabilities = flip_tta_inference(inputs, (16, 16, 16), model, overlap=0.0)
+    assert probabilities.shape == (1, 3, 16, 16, 16), tuple(probabilities.shape)
+    assert torch.allclose(probabilities.sum(dim=1), torch.ones(1, 16, 16, 16), atol=1e-5)
+
+
 def main() -> int:
     torch.manual_seed(0)
     tests = [(name, value) for name, value in sorted(globals().items())

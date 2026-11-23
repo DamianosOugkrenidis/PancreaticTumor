@@ -178,6 +178,23 @@ def _fmt(value, pattern="{:.3f}"):
     return "-" if value is None else pattern.format(value)
 
 
+def _latex_table(rows: list) -> str:
+    headers = ["Model", "Params (M)", "GFLOPs", "Tumor Dice", "Tumor IoU", "HD95 (mm)",
+               "Pancreas Dice", "Small Dice", "Large Dice"]
+    lines = ["\\begin{tabular}{lrrrrrrrr}", "\\toprule",
+             " & ".join(headers) + " \\\\", "\\midrule"]
+    for row in rows:
+        params = "-" if row.get("parameters") is None else f"{row['parameters'] / 1e6:.2f}"
+        cells = [str(row["model"]), params,
+                 _fmt(row.get("gflops"), "{:.1f}"), _fmt(row.get("tumor_dice")),
+                 _fmt(row.get("tumor_iou")), _fmt(row.get("tumor_hd95"), "{:.1f}"),
+                 _fmt(row.get("pancreas_dice")), _fmt(row.get("small_tumor_dice")),
+                 _fmt(row.get("large_tumor_dice"))]
+        lines.append(" & ".join(cells) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}", ""]
+    return "\n".join(lines)
+
+
 def main() -> int:
     arguments = parse_arguments()
     set_determinism(0)
@@ -255,6 +272,7 @@ def main() -> int:
     dump_json(output_dir / "comparison.json", {"device": str(device), "roi": arguments.roi,
                                                "rows": clean_rows, "pairwise": pairwise})
     dump_json(output_dir / "pairwise_stats.json", pairwise)
+    (output_dir / "comparison.tex").write_text(_latex_table(clean_rows), encoding="utf-8")
     print(f"\nReport written to {output_dir / 'comparison.csv'}")
     return 0
 

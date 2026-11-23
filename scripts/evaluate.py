@@ -12,9 +12,10 @@ import torch
 
 from src.ptseg.config import Config, load_configs
 from src.ptseg.data.msd import build_dataloaders
-from src.ptseg.inference import sliding_window_inference, stats_positions
+from src.ptseg.inference import flip_tta_inference, sliding_window_inference, stats_positions
 from src.ptseg.metrics import MetricAggregator, evaluate_case, stratify_by_volume
 from src.ptseg.models import build_model, describe_model
+from src.ptseg.postprocess import keep_largest_components
 from src.ptseg.utils import (count_parameters, device_summary, dump_json, get_logger,
                              resolve_device, set_determinism)
 
@@ -28,6 +29,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--device", default=None, help="Override run.device (auto|cpu|cuda).")
     parser.add_argument("--save-predictions", action="store_true",
                         help="Store per-case predicted label maps as .npy files.")
+    parser.add_argument("--postprocess", action="store_true",
+                        help="Keep only the largest connected component per foreground class.")
+    parser.add_argument("--tta", action="store_true",
+                        help="Average the logits over the eight flip combinations (slower).")
     return parser.parse_args()
 
 def _write_summary_csv(path: Path, summary: dict[str, float], class_names: list[str],
@@ -115,11 +120,22 @@ def main() -> int:
                 source = source[0] if source else f"case_{index:03d}"
             name = Path(str(source)).name
 
-            logits = sliding_window_inference(images, config.data.roi_size, model,
-                                              sw_batch_size=int(config.eval.sw_batch_size),
-                                              overlap=float(config.eval.overlap),
-                                              mode=config.eval.mode)
-            prediction = logits.argmax(dim=1)[0].cpu().numpy().astype(np.uint8)
+            if arguments.tta:
+                probabilities = flip_tta_inference(
+                    images, config.data.roi_size, model,
+                    sw_batch_size=int(config.eval.sw_batch_size),
+                    overlap=float(config.eval.overlap), mode=config.eval.mode)
+                prediction = probabilities.argmax(dim=1)[0].cpu().numpy().astype(np.uint8)
+            else:
+                logits = sliding_window_inference(images, config.data.roi_size, model,
+                                                  sw_batch_size=int(config.eval.sw_batch_size),
+                                                  overlap=float(config.eval.overlap),
+                                                  mode=config.eval.mode)
+                prediction = logits.argmax(dim=1)[0].cpu().numpy().astype(np.uint8)
+
+            if arguments.postprocess:
+                foreground = [index for index in config.data.labels.values() if index != 0]
+                prediction = keep_largest_components(prediction, tuple(foreground))
 
             ground_truth = labels[0]
             if ground_truth.dim() == 4:
@@ -162,6 +178,8 @@ def main() -> int:
         "parameters": total,
         "windows_per_case": window_counts,
         "mean_windows_per_case": float(np.mean(window_counts)) if window_counts else 0.0,
+        "tta": bool(arguments.tta),
+        "postprocess": bool(arguments.postprocess),
     })
 
     dump_json(run_dir / "artifacts" / "evaluation_metrics.json", summary)

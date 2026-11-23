@@ -101,9 +101,11 @@ def build_dataloaders(config: DataConfig, seed: int, logger: Any = None
     else:
         val_dataset = Dataset(data=val_files, transform=val_transforms(config))
 
-    loader_kwargs = dict(num_workers=int(config.num_workers),
-                         pin_memory=torch.cuda.is_available(),
+    num_workers = int(config.num_workers)
+    loader_kwargs = dict(num_workers=num_workers, pin_memory=torch.cuda.is_available(),
                          worker_init_fn=seed_worker, collate_fn=list_data_collate)
+    if num_workers > 0:
+        loader_kwargs.update(persistent_workers=True, prefetch_factor=2)
     train_loader = DataLoader(train_dataset, batch_size=int(config.batch_size),
                              shuffle=True, **loader_kwargs)
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, **loader_kwargs)

@@ -52,6 +52,59 @@ def soft_dice_loss(logits: torch.Tensor, targets: torch.Tensor, num_classes: int
 
     return 1.0 - (dice * weights).sum() / weights.sum().clamp_min(eps)
 
+def soft_tversky_loss(logits: torch.Tensor, targets: torch.Tensor, num_classes: int | None = None,
+                      alpha: float = 0.3, beta: float = 0.7, include_background: bool = False,
+                      class_weights: Sequence[float] | None = None,
+                      eps: float = 1e-5) -> torch.Tensor:
+    num_classes = num_classes or logits.shape[1]
+    one_hot = to_one_hot(targets, num_classes, logits)
+    probabilities = logits.softmax(dim=1)
+
+    dims = (0, 2, 3, 4)
+    true_positive = (probabilities * one_hot).sum(dim=dims)
+    false_positive = (probabilities * (1.0 - one_hot)).sum(dim=dims)
+    false_negative = ((1.0 - probabilities) * one_hot).sum(dim=dims)
+    tversky = (true_positive + eps) / (true_positive + alpha * false_positive
+                                       + beta * false_negative + eps)
+
+    present = one_hot.sum(dim=dims) > 0
+    selected = slice(1, num_classes) if not include_background else slice(0, num_classes)
+    tversky = tversky[selected]
+    presence = present[selected].to(tversky.dtype)
+    if float(presence.sum()) == 0.0:
+        return logits.new_zeros(())
+
+    if class_weights is not None:
+        weights = torch.as_tensor(class_weights, dtype=tversky.dtype, device=tversky.device)
+        weights = (weights[selected] if weights.numel() == num_classes else weights)[: tversky.numel()]
+        weights = weights * presence
+    else:
+        weights = presence
+    return 1.0 - (tversky * weights).sum() / weights.sum().clamp_min(eps)
+
+def soft_focal_loss(logits: torch.Tensor, targets: torch.Tensor, gamma: float = 2.0,
+                    class_weights: Sequence[float] | None = None,
+                    include_background: bool = False) -> torch.Tensor:
+    if targets.dim() == logits.dim() and targets.shape[1] == logits.shape[1]:
+        targets = targets.argmax(dim=1, keepdim=True)
+    if targets.dim() == logits.dim() - 1:
+        targets = targets.unsqueeze(1)
+    labels = targets[:, 0].long()
+
+    log_probabilities = F.log_softmax(logits, dim=1)
+    log_probability = log_probabilities.gather(1, labels.unsqueeze(1)).squeeze(1)
+    probability = log_probability.exp()
+    focal = (1.0 - probability) ** gamma * (-log_probability)
+
+    if class_weights is not None:
+        weights = torch.as_tensor(class_weights, dtype=focal.dtype, device=focal.device)
+        focal = focal * weights[labels]
+    if not include_background:
+        foreground = labels != 0
+        if foreground.any():
+            focal = focal[foreground]
+    return focal.mean()
+
 def dice_score(logits: torch.Tensor, targets: torch.Tensor, num_classes: int | None = None,
                include_background: bool = False) -> torch.Tensor:
     num_classes = num_classes or logits.shape[1]
@@ -76,6 +129,36 @@ class DiceOnlyLoss(nn.Module):
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         return soft_dice_loss(logits, targets, self.num_classes, self.include_background,
                               self.class_weights)
+
+class TverskyLoss(nn.Module):
+
+    def __init__(self, num_classes: int, alpha: float = 0.3, beta: float = 0.7,
+                 include_background: bool = False,
+                 class_weights: Sequence[float] | None = None) -> None:
+        super().__init__()
+        self.num_classes = int(num_classes)
+        self.alpha = float(alpha)
+        self.beta = float(beta)
+        self.include_background = bool(include_background)
+        self.class_weights = tuple(class_weights) if class_weights is not None else None
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return soft_tversky_loss(logits, targets, self.num_classes, self.alpha, self.beta,
+                                 self.include_background, self.class_weights)
+
+class FocalLoss(nn.Module):
+
+    def __init__(self, num_classes: int, gamma: float = 2.0, include_background: bool = False,
+                 class_weights: Sequence[float] | None = None) -> None:
+        super().__init__()
+        self.num_classes = int(num_classes)
+        self.gamma = float(gamma)
+        self.include_background = bool(include_background)
+        self.class_weights = tuple(class_weights) if class_weights is not None else None
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return soft_focal_loss(logits, targets, self.gamma, self.class_weights,
+                               self.include_background)
 
 class DiceCELoss(nn.Module):
 
@@ -116,4 +199,11 @@ def build_loss(config: LossConfig, num_classes: int) -> nn.Module:
                           config.include_background, config.class_weights)
     if name == "dice":
         return DiceOnlyLoss(num_classes, config.include_background, config.class_weights)
-    raise ValueError(f"Unknown loss name: {config.name!r} (expected dice_ce or dice).")
+    if name == "tversky":
+        return TverskyLoss(num_classes, config.tversky_alpha, config.tversky_beta,
+                           config.include_background, config.class_weights)
+    if name == "focal":
+        return FocalLoss(num_classes, config.focal_gamma, config.include_background,
+                         config.class_weights)
+    raise ValueError(f"Unknown loss name: {config.name!r} "
+                     "(expected dice_ce, dice, tversky or focal).")

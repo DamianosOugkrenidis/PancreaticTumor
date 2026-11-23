@@ -33,7 +33,7 @@ def gaussian_window(roi_size: Sequence[int], sigma_scale: float = 0.125,
         window = window.clamp_min(min_fraction)
     return window.to(device=device, dtype=dtype)[None, None]
 
-@torch.no_grad()
+@torch.inference_mode()
 def sliding_window_inference(inputs: torch.Tensor, roi_size: Sequence[int],
                              model: torch.nn.Module, sw_batch_size: int = 4,
                              overlap: float = 0.5, mode: str = "gaussian",
@@ -92,6 +92,25 @@ def sliding_window_inference(inputs: torch.Tensor, roi_size: Sequence[int],
 
     output = output / normaliser.clamp_min(1e-8)
     return output[..., :original_size[0], :original_size[1], :original_size[2]]
+
+def flip_tta_inference(inputs: torch.Tensor, roi_size: Sequence[int], model: torch.nn.Module,
+                       sw_batch_size: int = 4, overlap: float = 0.5, mode: str = "gaussian",
+                       axes: Sequence[int] = (2, 3, 4)) -> torch.Tensor:
+    combinations = list(itertools.product([False, True], repeat=len(axes)))
+    total: torch.Tensor | None = None
+    for flips in combinations:
+        flipped = inputs
+        for axis, flip in zip(axes, flips):
+            if flip:
+                flipped = torch.flip(flipped, dims=[axis])
+        logits = sliding_window_inference(flipped, roi_size, model, sw_batch_size=sw_batch_size,
+                                          overlap=overlap, mode=mode)
+        for axis, flip in zip(axes, flips):
+            if flip:
+                logits = torch.flip(logits, dims=[axis])
+        probabilities = logits.softmax(dim=1)
+        total = probabilities if total is None else total + probabilities
+    return total / len(combinations)
 
 def stats_positions(roi_size: Sequence[int], input_size: Sequence[int], overlap: float) -> int:
     roi = as_tuple3(roi_size, "roi_size")

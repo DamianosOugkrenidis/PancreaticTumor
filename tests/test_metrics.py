@@ -9,6 +9,18 @@ import numpy as np
 
 from src.ptseg.metrics import (MetricAggregator, evaluate_case, hausdorff_distance_95,
                                overlap_metrics, stratify_by_volume)
+from src.ptseg.postprocess import keep_largest_components
+
+
+def test_keep_largest_components_removes_specks() -> None:
+    volume = np.zeros((10, 10, 10), dtype=np.uint8)
+    volume[1:4, 1:4, 1:4] = 1
+    volume[8, 8, 8] = 1
+    cleaned = keep_largest_components(volume, (1,))
+    assert int(cleaned.sum()) == 27, int(cleaned.sum())
+    assert cleaned[8, 8, 8] == 0
+    empty = keep_largest_components(np.zeros((4, 4, 4), dtype=np.uint8), (1, 2))
+    assert int(empty.sum()) == 0
 
 
 def test_overlap_metrics_counts_tp_fp_fn() -> None:

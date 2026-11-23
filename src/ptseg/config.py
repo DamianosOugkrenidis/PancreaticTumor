@@ -67,6 +67,9 @@ class LossConfig:
     ce_weight: float = 1.0
     class_weights: Sequence[float] | None = None
     include_background: bool = False
+    tversky_alpha: float = 0.3
+    tversky_beta: float = 0.7
+    focal_gamma: float = 2.0
 
     @classmethod
     def from_dict(cls, raw: dict | None) -> "LossConfig":
@@ -247,7 +250,7 @@ def validate_config(config: Config) -> list[str]:
     if model.kwargs.get("in_channels", 1) != 1:
         notes.append("in_channels != 1: make sure the input pipeline provides that many channels.")
 
-    if config.train.amp and not config.train.loss.name in {"dice_ce", "dice"}:
+    if config.train.loss.name not in {"dice_ce", "dicece", "dice", "tversky", "focal"}:
         raise ValueError(f"Unknown loss: {config.train.loss.name!r}")
 
     return notes
