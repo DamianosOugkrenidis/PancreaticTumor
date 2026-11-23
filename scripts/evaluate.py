@@ -13,7 +13,8 @@ import torch
 from src.ptseg.config import Config, load_configs
 from src.ptseg.data.msd import build_dataloaders
 from src.ptseg.inference import flip_tta_inference, sliding_window_inference, stats_positions
-from src.ptseg.metrics import MetricAggregator, evaluate_case, stratify_by_volume
+from src.ptseg.metrics import (MetricAggregator, confusion_counts, evaluate_case,
+                               stratify_by_volume)
 from src.ptseg.models import build_model, describe_model
 from src.ptseg.postprocess import keep_largest_components
 from src.ptseg.utils import (count_parameters, device_summary, dump_json, get_logger,
@@ -109,6 +110,8 @@ def main() -> int:
     tumor_index = int(config.data.labels.get("tumor", 2))
     voxel_ml = float(np.prod(config.data.pixdim) / 1000.0)
     tumor_records: list[dict] = []
+    num_classes = len(class_names)
+    confusion_total = np.zeros((num_classes, num_classes), dtype=np.int64)
 
     with torch.no_grad():
         for index, batch in enumerate(val_loader):
@@ -146,8 +149,10 @@ def main() -> int:
                 prediction, ground_truth, class_names,
                 spacing=tuple(float(v) for v in config.data.pixdim),
                 include_background=config.eval.include_background,
-                hd95_percentile=float(config.eval.hd95_percentile), metrics=config.eval.metrics)
+                hd95_percentile=float(config.eval.hd95_percentile),
+                nsd_tolerance=float(config.eval.nsd_tolerance_mm), metrics=config.eval.metrics)
             aggregator.update(case_metrics)
+            confusion_total += confusion_counts(prediction, ground_truth, num_classes)
             case_names.append(name)
             window_counts.append(stats_positions(
                 config.data.roi_size, tuple(int(v) for v in images.shape[-3:]),
@@ -186,6 +191,10 @@ def main() -> int:
     dump_json(run_dir / "artifacts" / "evaluation_per_case.json", {
         "cases": case_names,
         "series": aggregator.per_case_series(),
+    })
+    dump_json(run_dir / "artifacts" / "confusion_matrix.json", {
+        "labels": class_names,
+        "counts": confusion_total.tolist(),
     })
     _write_summary_csv(run_dir / "artifacts" / "evaluation_table.csv", summary, report_classes,
                        list(config.eval.metrics))

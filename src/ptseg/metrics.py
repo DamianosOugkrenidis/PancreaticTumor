@@ -58,10 +58,39 @@ def overlap_metrics(prediction: np.ndarray, ground_truth: np.ndarray) -> dict[st
         "fn": float(false_negative),
     }
 
+def normalized_surface_dice(prediction: np.ndarray, ground_truth: np.ndarray,
+                            spacing: Sequence[float] = (1.0, 1.0, 1.0),
+                            tolerance: float = 1.0) -> float:
+    prediction = prediction.astype(bool)
+    ground_truth = ground_truth.astype(bool)
+    if not prediction.any() and not ground_truth.any():
+        return 1.0
+    if not prediction.any() or not ground_truth.any():
+        return float("nan")
+
+    surface_pred = surface_voxels(prediction)
+    surface_gt = surface_voxels(ground_truth)
+    distance_to_gt = ndimage.distance_transform_edt(~surface_gt, sampling=spacing)
+    distance_to_pred = ndimage.distance_transform_edt(~surface_pred, sampling=spacing)
+
+    pred_hits = int(np.count_nonzero(distance_to_gt[surface_pred] <= tolerance))
+    gt_hits = int(np.count_nonzero(distance_to_pred[surface_gt] <= tolerance))
+    denominator = int(surface_pred.sum()) + int(surface_gt.sum())
+    return float((pred_hits + gt_hits) / denominator) if denominator else float("nan")
+
+def confusion_counts(prediction: np.ndarray, ground_truth: np.ndarray,
+                     num_classes: int) -> np.ndarray:
+    truth = ground_truth.astype(np.int64)
+    predicted = prediction.astype(np.int64)
+    combined = truth * num_classes + predicted
+    counts = np.bincount(combined.ravel(), minlength=num_classes * num_classes)
+    return counts.reshape(num_classes, num_classes)
+
 def evaluate_case(prediction: np.ndarray, ground_truth: np.ndarray,
                   class_names: Sequence[str], spacing: Sequence[float] = (1.0, 1.0, 1.0),
                   include_background: bool = False, hd95_percentile: float = 95.0,
-                  metrics: Iterable[str] = ("dice", "iou", "precision", "recall", "hd95")
+                  nsd_tolerance: float = 1.0,
+                  metrics: Iterable[str] = ("dice", "iou", "precision", "recall", "hd95", "nsd")
                   ) -> dict[str, dict[str, float]]:
     metrics = tuple(metrics)
     results: dict[str, dict[str, float]] = {name: {} for name in metrics}
@@ -79,6 +108,9 @@ def evaluate_case(prediction: np.ndarray, ground_truth: np.ndarray,
         if "hd95" in metrics:
             results["hd95"][class_name] = hausdorff_distance_95(
                 pred_mask, gt_mask, spacing, hd95_percentile)
+        if "nsd" in metrics:
+            results["nsd"][class_name] = normalized_surface_dice(
+                pred_mask, gt_mask, spacing, nsd_tolerance)
 
     return results
 

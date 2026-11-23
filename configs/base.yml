@@ -54,6 +54,7 @@ eval:
   mode: gaussian
   include_background: false
   hd95_percentile: 95.0
-  metrics: [dice, iou, precision, recall, hd95]
+  nsd_tolerance_mm: 1.0
+  metrics: [dice, iou, precision, recall, hd95, nsd]
   selection_metric: tumor_dice
   max_cases: 0

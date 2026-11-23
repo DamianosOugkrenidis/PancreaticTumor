@@ -112,7 +112,8 @@ class EvalConfig:
     mode: str = "gaussian"
     include_background: bool = False
     hd95_percentile: float = 95.0
-    metrics: Sequence[str] = ("dice", "iou", "precision", "recall", "hd95")
+    nsd_tolerance_mm: float = 1.0
+    metrics: Sequence[str] = ("dice", "iou", "precision", "recall", "hd95", "nsd")
     selection_metric: str = "tumor_dice"
     max_cases: int = 0
 

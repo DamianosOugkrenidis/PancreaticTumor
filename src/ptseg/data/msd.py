@@ -72,6 +72,24 @@ def split_files(files: list[dict[str, str]], valid_ratio: float, seed: int
     num_valid = max(1, int(round(len(shuffled) * valid_ratio)))
     return shuffled[num_valid:], shuffled[:num_valid]
 
+def kfold_splits(files: list[dict[str, str]], num_folds: int = 5, seed: int = 42
+                 ) -> list[tuple[list[dict[str, str]], list[dict[str, str]]]]:
+    if num_folds < 2:
+        raise ValueError(f"num_folds must be >= 2, got {num_folds}.")
+    shuffled = list(files)
+    random.Random(seed).shuffle(shuffled)
+    groups: list[list[dict[str, str]]] = [[] for _ in range(num_folds)]
+    for position, entry in enumerate(shuffled):
+        groups[position % num_folds].append(entry)
+
+    splits = []
+    for fold in range(num_folds):
+        validation = groups[fold]
+        training = [entry for index, group in enumerate(groups) if index != fold
+                    for entry in group]
+        splits.append((training, validation))
+    return splits
+
 def build_dataloaders(config: DataConfig, seed: int, logger: Any = None
                       ) -> tuple[DataLoader, DataLoader, dict[str, Any]]:
     files, split_from_json = discover_files(config.root, config.dataset_json)

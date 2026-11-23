@@ -76,8 +76,8 @@ def gather_metrics(run: Path) -> dict:
     train_seconds = None
     if summary_path.is_file():
         train_seconds = _number(_read_json(summary_path).get("total_seconds"))
-    keys = ("pancreas_dice", "tumor_dice", "tumor_iou", "tumor_hd95", "mean_dice",
-            "mean_hd95", "num_cases")
+    keys = ("pancreas_dice", "tumor_dice", "tumor_iou", "tumor_hd95", "tumor_nsd",
+            "mean_dice", "mean_hd95", "mean_nsd", "num_cases")
     record = {key: _number(payload.get(key)) for key in keys}
     record["train_seconds"] = train_seconds
     size_path = run / "artifacts" / "tumor_size_analysis.json"
@@ -205,9 +205,10 @@ def main() -> int:
             record["_per_case"] = load_per_case(run)
         else:
             record.update({key: None for key in ("pancreas_dice", "tumor_dice", "tumor_iou",
-                                                 "tumor_hd95", "mean_dice", "mean_hd95",
-                                                 "num_cases", "train_seconds",
-                                                 "small_tumor_dice", "large_tumor_dice")})
+                                                 "tumor_hd95", "tumor_nsd", "mean_dice",
+                                                 "mean_hd95", "mean_nsd", "num_cases",
+                                                 "train_seconds", "small_tumor_dice",
+                                                 "large_tumor_dice")})
             record["run"] = None
         rows.append(record)
 
@@ -244,8 +245,8 @@ def main() -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     fields = ["model", "parameters", "gflops", "forward_ms", "pancreas_dice", "tumor_dice",
-              "tumor_iou", "tumor_hd95", "small_tumor_dice", "large_tumor_dice", "mean_dice",
-              "mean_hd95", "num_cases", "train_seconds", "run"]
+              "tumor_iou", "tumor_hd95", "tumor_nsd", "small_tumor_dice", "large_tumor_dice",
+              "mean_dice", "mean_hd95", "mean_nsd", "num_cases", "train_seconds", "run"]
     with (output_dir / "comparison.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()

@@ -7,9 +7,34 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import numpy as np
 
-from src.ptseg.metrics import (MetricAggregator, evaluate_case, hausdorff_distance_95,
+from src.ptseg.metrics import (MetricAggregator, confusion_counts, evaluate_case,
+                               hausdorff_distance_95, normalized_surface_dice,
                                overlap_metrics, stratify_by_volume)
 from src.ptseg.postprocess import keep_largest_components
+
+
+def test_normalized_surface_dice_bounds() -> None:
+    blob = np.zeros((8, 8, 8), dtype=bool)
+    blob[2:6, 2:6, 2:6] = True
+    assert abs(normalized_surface_dice(blob, blob) - 1.0) < 1e-9
+    shifted = np.roll(blob, 3, axis=0)
+    assert normalized_surface_dice(shifted, blob, tolerance=0.5) < 1.0
+    assert np.isnan(normalized_surface_dice(blob, np.zeros_like(blob)))
+
+
+def test_confusion_counts_shape_and_sum() -> None:
+    prediction = np.zeros((4, 4, 4), dtype=np.uint8)
+    ground_truth = np.zeros((4, 4, 4), dtype=np.uint8)
+    prediction[0, 0, 0] = 1
+    ground_truth[0, 0, 0] = 1
+    prediction[1, 1, 1] = 2
+    ground_truth[1, 1, 1] = 1
+    counts = confusion_counts(prediction, ground_truth, 3)
+    assert counts.shape == (3, 3)
+    assert int(counts.sum()) == prediction.size
+    assert counts[1, 1] == 1
+    assert counts[1, 2] == 1
+    assert counts[0, 0] == prediction.size - 2
 
 
 def test_keep_largest_components_removes_specks() -> None:
