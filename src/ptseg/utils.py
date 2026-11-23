@@ -190,6 +190,17 @@ def as_tuple3(value: int | Sequence[int], name: str = "value") -> tuple[int, int
 def divisible_by(value: int, divisor: int) -> bool:
     return divisor > 0 and value % divisor == 0
 
+def apply_intensity_window(array: np.ndarray, low: float, high: float,
+                           out_range: tuple[float, float] = (0.0, 1.0)) -> np.ndarray:
+    clipped = np.clip(array, low, high)
+    if high > low:
+        scaled = (clipped - low) / (high - low)
+    else:
+        scaled = np.zeros_like(clipped, dtype=np.float32)
+    low_out, high_out = out_range
+    return scaled * (high_out - low_out) + low_out
+
+
 def pad_to_multiple(x: torch.Tensor, multiple: int | tuple[int, int, int],
                     mode: str = "constant") -> tuple[torch.Tensor, tuple[int, int, int]]:
     dims = x.shape[-3:]

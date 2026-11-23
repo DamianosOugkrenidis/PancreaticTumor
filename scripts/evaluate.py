@@ -34,6 +34,8 @@ def parse_arguments() -> argparse.Namespace:
                         help="Keep only the largest connected component per foreground class.")
     parser.add_argument("--tta", action="store_true",
                         help="Average the logits over the eight flip combinations (slower).")
+    parser.add_argument("--use-ema", action="store_true",
+                        help="Use the exponential-moving-average weights when available.")
     return parser.parse_args()
 
 def _write_summary_csv(path: Path, summary: dict[str, float], class_names: list[str],
@@ -94,6 +96,8 @@ def main() -> int:
 
     model = build_model(config.model.name, **config.model.kwargs).to(device)
     model.load_state_dict(checkpoint["model"])
+    if arguments.use_ema and checkpoint.get("ema"):
+        model.load_state_dict(checkpoint["ema"])
     model.eval()
     total, _ = count_parameters(model)
     logger.info(f"Checkpoint epoch {checkpoint.get('epoch')} | {total:,} parameters | "

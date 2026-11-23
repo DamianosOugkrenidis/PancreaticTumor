@@ -32,6 +32,7 @@ train:
   warmup_epochs: 10
   scheduler: cosine
   eta_min: 1.0e-6
+  ema_decay: 0.0
   log_every_steps: 20
   val_interval: 1
   max_steps: 0

@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 
 from .config import Config
+from .ema import ModelEMA
 from .inference import sliding_window_inference
 from .losses import build_loss, dice_score
 from .metrics import MetricAggregator, evaluate_case
@@ -44,6 +45,9 @@ class Trainer:
         self.optimizer = self._build_optimizer()
         self.scheduler = self._build_scheduler()
         self.scaler = self._build_scaler()
+
+        ema_decay = float(config.train.ema_decay)
+        self.ema = ModelEMA(self.model, ema_decay) if 0.0 < ema_decay < 1.0 else None
 
         self.history: list[dict[str, Any]] = []
         self.best_metric = -math.inf
@@ -141,6 +145,8 @@ class Trainer:
                     else:
                         self.optimizer.step()
                     self.optimizer.zero_grad(set_to_none=True)
+                    if self.ema is not None:
+                        self.ema.update(self.model)
 
                 running_loss += float(loss.detach()) * self.accumulation_steps
                 with torch.no_grad():
@@ -165,6 +171,8 @@ class Trainer:
             else:
                 self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
+            if self.ema is not None:
+                self.ema.update(self.model)
 
         dice = (dice_sums / max(steps, 1)).detach().cpu().numpy()
         metrics: dict[str, Any] = {
@@ -182,6 +190,9 @@ class Trainer:
             else list(self.class_names[1:])
         aggregator = MetricAggregator(class_names=report_classes,
                                       metric_names=self.config.eval.metrics)
+        if self.ema is not None:
+            self.ema.store(self.model)
+            self.ema.copy_to(self.model)
         self.model.eval()
         max_cases = int(self.config.eval.max_cases)
         with Timer() as timer:
@@ -212,6 +223,8 @@ class Trainer:
                     aggregator.update(case_metrics)
 
         summary = aggregator.summary()
+        if self.ema is not None:
+            self.ema.restore(self.model)
         summary["val_seconds"] = timer.elapsed
         summary["epoch"] = epoch
         return summary
@@ -331,11 +344,14 @@ class Trainer:
             "model_name": self.config.model.name,
             "model_kwargs": self.config.model.kwargs,
             "selection_metric": self.selection_metric,
+            "ema": self.ema.state_dict() if self.ema is not None else None,
         }, path)
 
     def load_checkpoint(self, path: str | Path, resume_optimizer: bool = True) -> dict[str, Any]:
         checkpoint = torch.load(Path(path), map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model"])
+        if self.ema is not None and checkpoint.get("ema"):
+            self.ema.module.load_state_dict(checkpoint["ema"])
         if resume_optimizer:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             if self.scheduler is not None and checkpoint.get("scheduler"):
@@ -350,7 +366,14 @@ class Trainer:
         return checkpoint
 
     def predict(self, images: torch.Tensor) -> torch.Tensor:
-        return sliding_window_inference(images, self.config.data.roi_size, self.model,
-                                        sw_batch_size=int(self.config.eval.sw_batch_size),
-                                        overlap=float(self.config.eval.overlap),
-                                        mode=self.config.eval.mode)
+        if self.ema is not None:
+            self.ema.store(self.model)
+            self.ema.copy_to(self.model)
+        try:
+            return sliding_window_inference(images, self.config.data.roi_size, self.model,
+                                            sw_batch_size=int(self.config.eval.sw_batch_size),
+                                            overlap=float(self.config.eval.overlap),
+                                            mode=self.config.eval.mode)
+        finally:
+            if self.ema is not None:
+                self.ema.restore(self.model)

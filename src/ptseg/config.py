@@ -91,6 +91,7 @@ class TrainConfig:
     warmup_epochs: int = 10
     scheduler: str = "cosine"
     eta_min: float = 1e-6
+    ema_decay: float = 0.0
     log_every_steps: int = 20
     val_interval: int = 1
     max_steps: int = 0
